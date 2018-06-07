@@ -31,9 +31,11 @@ var _ = Describe("manager", func() {
 	})
 
 	BeforeEach(func() {
-		tx, err := MySQL().BeginTx()
+		tx, closeFunc, err := MySQL().BeginTxWithCloser()
 		Ω(err).ShouldNot(HaveOccurred())
-		defer tx.Close()
+		defer closeFunc()
+
+		Ω(tx.GetError()).ShouldNot(HaveOccurred())
 
 		users := []*User{}
 		for i := 0; i < 100; i++ {
