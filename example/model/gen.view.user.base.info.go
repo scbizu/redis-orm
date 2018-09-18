@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"gopkg.in/ezbuy/redis-orm.v1/orm"
+	"github.com/ezbuy/redis-orm/orm"
 	"gopkg.in/go-playground/validator.v9"
 )
 
@@ -66,11 +66,11 @@ func (obj *UserBaseInfo) GetTableName() string {
 
 func (obj *UserBaseInfo) GetColumns() []string {
 	columns := []string{
-		"`id`",
-		"`name`",
-		"`mailbox`",
-		"`password`",
-		"`sex`",
+		".`id`",
+		".`name`",
+		".`mailbox`",
+		".`password`",
+		".`sex`",
 	}
 	return columns
 }
@@ -405,17 +405,14 @@ func UserBaseInfoDBMgr(db orm.DB) *_UserBaseInfoDBMgr {
 
 func (m *_UserBaseInfoDBMgr) Search(where string, orderby string, limit string, args ...interface{}) ([]*UserBaseInfo, error) {
 	obj := UserBaseInfoMgr.NewUserBaseInfo()
+
+	if limit = strings.ToUpper(strings.TrimSpace(limit)); limit != "" && !strings.HasPrefix(limit, "LIMIT") {
+		limit = "LIMIT " + limit
+	}
+
 	conditions := []string{where, orderby, limit}
 	query := fmt.Sprintf("SELECT %s FROM user_base_info %s", strings.Join(obj.GetColumns(), ","), strings.Join(conditions, " "))
-	objs, err := m.FetchBySQL(query, args...)
-	if err != nil {
-		return nil, err
-	}
-	results := make([]*UserBaseInfo, 0, len(objs))
-	for _, obj := range objs {
-		results = append(results, obj.(*UserBaseInfo))
-	}
-	return results, nil
+	return m.FetchBySQL(query, args...)
 }
 
 func (m *_UserBaseInfoDBMgr) SearchConditions(conditions []string, orderby string, offset int, limit int, args ...interface{}) ([]*UserBaseInfo, error) {
@@ -426,15 +423,7 @@ func (m *_UserBaseInfoDBMgr) SearchConditions(conditions []string, orderby strin
 		orderby,
 		orm.SQLOffsetLimit(offset, limit))
 
-	objs, err := m.FetchBySQL(q, args...)
-	if err != nil {
-		return nil, err
-	}
-	results := make([]*UserBaseInfo, 0, len(objs))
-	for _, obj := range objs {
-		results = append(results, obj.(*UserBaseInfo))
-	}
-	return results, nil
+	return m.FetchBySQL(q, args...)
 }
 
 func (m *_UserBaseInfoDBMgr) SearchCount(where string, args ...interface{}) (int64, error) {
@@ -445,7 +434,7 @@ func (m *_UserBaseInfoDBMgr) SearchConditionsCount(conditions []string, args ...
 	return m.queryCount(orm.SQLWhere(conditions), args...)
 }
 
-func (m *_UserBaseInfoDBMgr) FetchBySQL(q string, args ...interface{}) (results []interface{}, err error) {
+func (m *_UserBaseInfoDBMgr) FetchBySQL(q string, args ...interface{}) (results []*UserBaseInfo, err error) {
 	rows, err := m.db.Query(q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("UserBaseInfo fetch error: %v", err)
@@ -476,6 +465,7 @@ func (m *_UserBaseInfoDBMgr) Exist(pk PrimaryKey) (bool, error) {
 	return (c != 0), nil
 }
 
+// Deprecated: Use FetchByPrimaryKey instead.
 func (m *_UserBaseInfoDBMgr) Fetch(pk PrimaryKey) (*UserBaseInfo, error) {
 	obj := UserBaseInfoMgr.NewUserBaseInfo()
 	query := fmt.Sprintf("SELECT %s FROM user_base_info %s", strings.Join(obj.GetColumns(), ","), pk.SQLFormat())
@@ -484,27 +474,105 @@ func (m *_UserBaseInfoDBMgr) Fetch(pk PrimaryKey) (*UserBaseInfo, error) {
 		return nil, err
 	}
 	if len(objs) > 0 {
-		return objs[0].(*UserBaseInfo), nil
+		return objs[0], nil
 	}
 	return nil, fmt.Errorf("UserBaseInfo fetch record not found")
 }
 
-func (m *_UserBaseInfoDBMgr) FetchByPrimaryKeys(pks []PrimaryKey) ([]*UserBaseInfo, error) {
-	params := make([]string, 0, len(pks))
-	for _, pk := range pks {
-		params = append(params, fmt.Sprint(pk.(*IdOfUserBaseInfoPK).Id))
-	}
+// err not found check
+func (m *_UserBaseInfoDBMgr) IsErrNotFound(err error) bool {
+	return strings.Contains(err.Error(), "not found") || err == sql.ErrNoRows
+}
+
+// primary key
+func (m *_UserBaseInfoDBMgr) FetchByPrimaryKey(id int32) (*UserBaseInfo, error) {
 	obj := UserBaseInfoMgr.NewUserBaseInfo()
-	query := fmt.Sprintf("SELECT %s FROM user_base_info WHERE `id` IN (%s)", strings.Join(obj.GetColumns(), ","), strings.Join(params, ","))
-	objs, err := m.FetchBySQL(query)
+	pk := &IdOfUserBaseInfoPK{
+		Id: id,
+	}
+
+	query := fmt.Sprintf("SELECT %s FROM user_base_info %s", strings.Join(obj.GetColumns(), ","), pk.SQLFormat())
+	objs, err := m.FetchBySQL(query, pk.SQLParams()...)
 	if err != nil {
 		return nil, err
 	}
-	results := make([]*UserBaseInfo, 0, len(objs))
-	for _, obj := range objs {
-		results = append(results, obj.(*UserBaseInfo))
+	if len(objs) > 0 {
+		return objs[0], nil
 	}
-	return results, nil
+	return nil, fmt.Errorf("UserBaseInfo fetch record not found")
+}
+
+func (m *_UserBaseInfoDBMgr) FetchByPrimaryKeys(ids []int32) ([]*UserBaseInfo, error) {
+	size := len(ids)
+	if size == 0 {
+		return nil, nil
+	}
+	params := make([]interface{}, 0, size)
+	for _, pk := range ids {
+		params = append(params, pk)
+	}
+	obj := UserBaseInfoMgr.NewUserBaseInfo()
+	query := fmt.Sprintf("SELECT %s FROM user_base_info WHERE `id` IN (?%s)", strings.Join(obj.GetColumns(), ","),
+		strings.Repeat(",?", size-1))
+	return m.FetchBySQL(query, params...)
+}
+
+// indexes
+
+func (m *_UserBaseInfoDBMgr) FindByName(name string, limit int, offset int) ([]*UserBaseInfo, error) {
+	obj := UserBaseInfoMgr.NewUserBaseInfo()
+	idx := &NameOfUserBaseInfoIDX{
+		Name:   name,
+		limit:  limit,
+		offset: offset,
+	}
+
+	query := fmt.Sprintf("SELECT %s FROM user_base_info %s", strings.Join(obj.GetColumns(), ","), idx.SQLFormat(true))
+	return m.FetchBySQL(query, idx.SQLParams()...)
+}
+
+func (m *_UserBaseInfoDBMgr) FindAllByName(name string) ([]*UserBaseInfo, error) {
+	obj := UserBaseInfoMgr.NewUserBaseInfo()
+	idx := &NameOfUserBaseInfoIDX{
+		Name: name,
+	}
+
+	query := fmt.Sprintf("SELECT %s FROM user_base_info %s", strings.Join(obj.GetColumns(), ","), idx.SQLFormat(true))
+	return m.FetchBySQL(query, idx.SQLParams()...)
+}
+
+func (m *_UserBaseInfoDBMgr) FindByNameGroup(items []string) ([]*UserBaseInfo, error) {
+	obj := UserBaseInfoMgr.NewUserBaseInfo()
+	if len(items) == 0 {
+		return nil, nil
+	}
+	params := make([]interface{}, 0, len(items))
+	for _, item := range items {
+		params = append(params, item)
+	}
+	query := fmt.Sprintf("SELECT %s FROM user_base_info where `name` in (?", strings.Join(obj.GetColumns(), ",")) +
+		strings.Repeat(",?", len(items)-1) + ")"
+	return m.FetchBySQL(query, params...)
+}
+
+// uniques
+
+func (m *_UserBaseInfoDBMgr) FetchByMailboxPassword(mailbox string, password string) (*UserBaseInfo, error) {
+	obj := UserBaseInfoMgr.NewUserBaseInfo()
+	uniq := &MailboxPasswordOfUserBaseInfoUK{
+		Mailbox:  mailbox,
+		Password: password,
+	}
+
+	query := fmt.Sprintf("SELECT %s FROM user_base_info %s", strings.Join(obj.GetColumns(), ","), uniq.SQLFormat(true))
+	objs, err := m.FetchBySQL(query, uniq.SQLParams()...)
+	if err != nil {
+		return nil, err
+	}
+	if len(objs) > 0 {
+		return objs[0], nil
+	}
+	return nil, fmt.Errorf("UserBaseInfo fetch record not found")
 }
 
 func (m *_UserBaseInfoDBMgr) FindOne(unique Unique) (PrimaryKey, error) {
@@ -518,6 +586,7 @@ func (m *_UserBaseInfoDBMgr) FindOne(unique Unique) (PrimaryKey, error) {
 	return nil, fmt.Errorf("UserBaseInfo find record not found")
 }
 
+// Deprecated: Use FetchByXXXUnique instead.
 func (m *_UserBaseInfoDBMgr) FindOneFetch(unique Unique) (*UserBaseInfo, error) {
 	obj := UserBaseInfoMgr.NewUserBaseInfo()
 	query := fmt.Sprintf("SELECT %s FROM user_base_info %s", strings.Join(obj.GetColumns(), ","), unique.SQLFormat(true))
@@ -526,11 +595,12 @@ func (m *_UserBaseInfoDBMgr) FindOneFetch(unique Unique) (*UserBaseInfo, error) 
 		return nil, err
 	}
 	if len(objs) > 0 {
-		return objs[0].(*UserBaseInfo), nil
+		return objs[0], nil
 	}
 	return nil, fmt.Errorf("none record")
 }
 
+// Deprecated: Use FindByXXXUnique instead.
 func (m *_UserBaseInfoDBMgr) Find(index Index) (int64, []PrimaryKey, error) {
 	total, err := m.queryCount(index.SQLFormat(false), index.SQLParams()...)
 	if err != nil {
@@ -548,13 +618,9 @@ func (m *_UserBaseInfoDBMgr) FindFetch(index Index) (int64, []*UserBaseInfo, err
 
 	obj := UserBaseInfoMgr.NewUserBaseInfo()
 	query := fmt.Sprintf("SELECT %s FROM user_base_info %s", strings.Join(obj.GetColumns(), ","), index.SQLFormat(true))
-	objs, err := m.FetchBySQL(query, index.SQLParams()...)
+	results, err := m.FetchBySQL(query, index.SQLParams()...)
 	if err != nil {
 		return total, nil, err
-	}
-	results := make([]*UserBaseInfo, 0, len(objs))
-	for _, obj := range objs {
-		results = append(results, obj.(*UserBaseInfo))
 	}
 	return total, results, nil
 }
@@ -575,13 +641,9 @@ func (m *_UserBaseInfoDBMgr) RangeFetch(scope Range) (int64, []*UserBaseInfo, er
 	}
 	obj := UserBaseInfoMgr.NewUserBaseInfo()
 	query := fmt.Sprintf("SELECT %s FROM user_base_info %s", strings.Join(obj.GetColumns(), ","), scope.SQLFormat(true))
-	objs, err := m.FetchBySQL(query, scope.SQLParams()...)
+	results, err := m.FetchBySQL(query, scope.SQLParams()...)
 	if err != nil {
 		return total, nil, err
-	}
-	results := make([]*UserBaseInfo, 0, len(objs))
-	for _, obj := range objs {
-		results = append(results, obj.(*UserBaseInfo))
 	}
 	return total, results, nil
 }

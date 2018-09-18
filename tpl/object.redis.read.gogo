@@ -3,6 +3,8 @@
 {{$primary := $obj.PrimaryKey}}
 {{$primaryField := $primary.FirstField }}
 
+var new{{$obj.Name}}Obj = {{$obj.Name}}Mgr.New{{$obj.Name}}()
+
 //! redis model read
 func (m *_{{$obj.Name}}RedisMgr) FindOne(unique Unique) (PrimaryKey, error) {
 	if relation := unique.UKRelation(m.RedisStore); relation != nil {
@@ -130,12 +132,17 @@ func (m *_{{$obj.Name}}RedisMgr) RangeRevertFetch(scope Range) (int64, []*{{$obj
 }
 
 func (m *_{{$obj.Name}}RedisMgr) Fetch(pk PrimaryKey) (*{{$obj.Name}}, error) {
+	key:= keyOfObject(new{{$obj.Name}}Obj, pk.Key())
+	return m.FetchByKey(key)
+}
+
+func (m *_{{$obj.Name}}RedisMgr) FetchByKey(key string) (*{{$obj.Name}}, error) {
 	obj := {{$obj.Name}}Mgr.New{{$obj.Name}}()
-	
+
 	pipe := m.BeginPipeline()
-	pipe.Exists(keyOfObject(obj, pk.Key()))
-	pipe.HMGet(keyOfObject(obj, pk.Key()),
-	{{- range $i, $field := $obj.Fields}}	
+	pipe.Exists(key)
+	pipe.HMGet(key,
+	{{- range $i, $field := $obj.Fields}}
 	"{{$field.Name}}",
 	{{- end -}})
 	cmds, err := pipe.Exec()
@@ -145,7 +152,7 @@ func (m *_{{$obj.Name}}RedisMgr) Fetch(pk PrimaryKey) (*{{$obj.Name}}, error) {
 
 	if b, err := cmds[0].(*redis.BoolCmd).Result(); err == nil {
 		if !b {
-			return nil, fmt.Errorf("{{$obj.Name}} primary key:(%s) not exist", pk.Key())
+			return nil, fmt.Errorf("{{$obj.Name}} primary key:(%s) not exist", key)
 		}
 	}
 
@@ -154,28 +161,30 @@ func (m *_{{$obj.Name}}RedisMgr) Fetch(pk PrimaryKey) (*{{$obj.Name}}, error) {
 		return nil, err
 	}
 
-	{{- range $i, $field := $obj.Fields}}		
+	var sv string
+	{{- range $i, $field := $obj.Fields}}
+		sv, _ = strs[{{$i}}].(string)
 		{{- if $field.IsNeedTransform}}
 			{{- if $field.IsNullable }}
-				if strs[{{$i}}].(string) == "nil" {
-					obj.{{$field.Name}} = nil	
+				if sv == "nil" {
+					obj.{{$field.Name}} = nil
 				} else {
 					var val{{$i}} {{$field.GetTransform.TypeOrigin}}
-					if err := orm.StringScan(strs[{{$i}}].(string), &val{{$i}}); err != nil {
+					if err := orm.StringScan(sv, &val{{$i}}); err != nil {
 						return nil, err
 					}
 					{{$field.Name}}Value := {{- printf $field.GetTransform.ConvertTo (printf "val%d" $i)}}
-					obj.{{$field.Name}} = &{{$field.Name}}Value 
-				}				
+					obj.{{$field.Name}} = &{{$field.Name}}Value
+				}
 			{{- else}}
 				var val{{$i}} {{$field.GetTransform.TypeOrigin}}
-				if err := orm.StringScan(strs[{{$i}}].(string), &val{{$i}}); err != nil {
+				if err := orm.StringScan(sv, &val{{$i}}); err != nil {
 					return nil, err
 				}
 				obj.{{$field.Name}} = {{- printf $field.GetTransform.ConvertTo (printf "val%d" $i)}}
 			{{- end}}
 		{{- else}}
-			if err := orm.StringScan(strs[{{$i}}].(string), &obj.{{$field.Name}}); err != nil {
+			if err := orm.StringScan(sv, &obj.{{$field.Name}}); err != nil {
 				return nil, err
 			}
 		{{- end}}
@@ -190,10 +199,10 @@ func (m *_{{$obj.Name}}RedisMgr) FetchByPrimaryKeys(pks []PrimaryKey) ([]*{{$obj
 	objs := make([]*{{$obj.Name}}, 0, len(pks))
 	pipe := m.BeginPipeline()
 	obj := {{$obj.Name}}Mgr.New{{$obj.Name}}()
-	for _, pk := range pks {		
+	for _, pk := range pks {
 		pipe.Exists(keyOfObject(obj, pk.Key()))
 		pipe.HMGet(keyOfObject(obj, pk.Key()),
-		{{- range $i, $field := $obj.Fields}}	
+		{{- range $i, $field := $obj.Fields}}
 		"{{$field.Name}}",
 		{{- end -}})
 	}
@@ -207,40 +216,39 @@ func (m *_{{$obj.Name}}RedisMgr) FetchByPrimaryKeys(pks []PrimaryKey) ([]*{{$obj
 	for i := 0; i < len(pks); i++ {
 		if b, err := cmds[2*i].(*redis.BoolCmd).Result(); err == nil {
 			if !b {
-			    errall = append(errall, fmt.Sprintf("{{$obj.Name}} primary key:(%s) not exist", pks[i].Key()))
-                continue
+				errall = append(errall, fmt.Sprintf("{{$obj.Name}} primary key:(%s) not exist", pks[i].Key()))
+				continue
 			}
 		}
 
 		strs, err := cmds[2*i+1].(*redis.SliceCmd).Result()
 		if err != nil {
-		    errall = append(errall, fmt.Sprintf("key:%v,err:%v", pks[i].Key(), err.Error()))
+			errall = append(errall, fmt.Sprintf("key:%v,err:%v", pks[i].Key(), err.Error()))
 			continue
 		}
 
 		obj := {{$obj.Name}}Mgr.New{{$obj.Name}}()
-		{{- range $i, $field := $obj.Fields}}		
+		{{- range $i, $field := $obj.Fields}}
+			sv, ok = strs[{{$i}}].(string)
 			{{- if $field.IsNeedTransform}}
 				{{- if $field.IsNullable }}
-					if strs[{{$i}}].(string) == "nil" {
-						obj.{{$field.Name}} = nil	
+					if sv == "nil" {
+						obj.{{$field.Name}} = nil
 					} else {
 						var val{{$i}} {{$field.GetTransform.TypeOrigin}}
-						sv, ok = strs[{{$i}}].(string)
 						if !ok {
-						    errall = append(errall, fmt.Sprintf("convert %v to string error", strs[{{$i}}]))
-						    continue
+							errall = append(errall, fmt.Sprintf("convert %v to string error", strs[{{$i}}]))
+							continue
 						}
 						if err := orm.StringScan(sv, &val{{$i}}); err != nil {
-	                        errall = append(errall, fmt.Sprintf("key:%v,err:%v", pks[i].Key(), err.Error()))
+							errall = append(errall, fmt.Sprintf("key:%v,err:%v", pks[i].Key(), err.Error()))
 							continue
 						}
 						{{$field.Name}}Value := {{- printf $field.GetTransform.ConvertTo (printf "val%d" $i)}}
-						obj.{{$field.Name}} = &{{$field.Name}}Value 
-					}				
+						obj.{{$field.Name}} = &{{$field.Name}}Value
+					}
 				{{- else}}
 					var val{{$i}} {{$field.GetTransform.TypeOrigin}}
-					sv, ok = strs[{{$i}}].(string)
 					if !ok {
 					    errall = append(errall, fmt.Sprintf("convert %v to string error", strs[{{$i}}]))
 					    continue
@@ -250,15 +258,14 @@ func (m *_{{$obj.Name}}RedisMgr) FetchByPrimaryKeys(pks []PrimaryKey) ([]*{{$obj
 					    continue
 					}
 					obj.{{$field.Name}} = {{- printf $field.GetTransform.ConvertTo (printf "val%d" $i)}}
-				{{- end}}				
+				{{- end}}
 			{{- else}}
-			    sv, ok = strs[{{$i}}].(string)
-            	if !ok {
-            	    errall = append(errall, fmt.Sprintf("convert %v to string error", strs[{{$i}}]))
-            	    continue
-            	}
+				if !ok {
+					errall = append(errall, fmt.Sprintf("convert %v to string error", strs[{{$i}}]))
+					continue
+				}
 				if err := orm.StringScan(sv, &obj.{{$field.Name}}); err != nil {
-				    errall = append(errall, fmt.Sprintf("key:%v,err:%v", pks[i].Key(), err.Error()))
+					errall = append(errall, fmt.Sprintf("key:%v,err:%v", pks[i].Key(), err.Error()))
 					continue
 				}
 			{{- end}}
@@ -269,7 +276,7 @@ func (m *_{{$obj.Name}}RedisMgr) FetchByPrimaryKeys(pks []PrimaryKey) ([]*{{$obj
 		objs = append(objs, obj)
 	}
 	if len(errall) > 0 {
-	    return objs, errors.New(strings.Join(errall, ERROR_SPLIT))
+		return objs, errors.New(strings.Join(errall, ERROR_SPLIT))
 	}
 	return objs, nil
 }

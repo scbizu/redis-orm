@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"gopkg.in/ezbuy/redis-orm.v1/orm"
+	"github.com/ezbuy/redis-orm/orm"
 	"gopkg.in/go-playground/validator.v9"
 	redis "gopkg.in/redis.v5"
 )
@@ -95,20 +95,20 @@ func (obj *User) GetTableName() string {
 
 func (obj *User) GetColumns() []string {
 	columns := []string{
-		"`id`",
-		"`name`",
-		"`mailbox`",
-		"`sex`",
-		"`age`",
-		"`longitude`",
-		"`latitude`",
-		"`description`",
-		"`password`",
-		"`head_url`",
-		"`status`",
-		"`created_at`",
-		"`updated_at`",
-		"`deleted_at`",
+		"users.`id`",
+		"users.`name`",
+		"users.`mailbox`",
+		"users.`sex`",
+		"users.`age`",
+		"users.`longitude`",
+		"users.`latitude`",
+		"users.`description`",
+		"users.`password`",
+		"users.`head_url`",
+		"users.`status`",
+		"users.`created_at`",
+		"users.`updated_at`",
+		"users.`deleted_at`",
 	}
 	return columns
 }
@@ -593,17 +593,14 @@ func UserDBMgr(db orm.DB) *_UserDBMgr {
 
 func (m *_UserDBMgr) Search(where string, orderby string, limit string, args ...interface{}) ([]*User, error) {
 	obj := UserMgr.NewUser()
+
+	if limit = strings.ToUpper(strings.TrimSpace(limit)); limit != "" && !strings.HasPrefix(limit, "LIMIT") {
+		limit = "LIMIT " + limit
+	}
+
 	conditions := []string{where, orderby, limit}
 	query := fmt.Sprintf("SELECT %s FROM users %s", strings.Join(obj.GetColumns(), ","), strings.Join(conditions, " "))
-	objs, err := m.FetchBySQL(query, args...)
-	if err != nil {
-		return nil, err
-	}
-	results := make([]*User, 0, len(objs))
-	for _, obj := range objs {
-		results = append(results, obj.(*User))
-	}
-	return results, nil
+	return m.FetchBySQL(query, args...)
 }
 
 func (m *_UserDBMgr) SearchConditions(conditions []string, orderby string, offset int, limit int, args ...interface{}) ([]*User, error) {
@@ -614,15 +611,7 @@ func (m *_UserDBMgr) SearchConditions(conditions []string, orderby string, offse
 		orderby,
 		orm.SQLOffsetLimit(offset, limit))
 
-	objs, err := m.FetchBySQL(q, args...)
-	if err != nil {
-		return nil, err
-	}
-	results := make([]*User, 0, len(objs))
-	for _, obj := range objs {
-		results = append(results, obj.(*User))
-	}
-	return results, nil
+	return m.FetchBySQL(q, args...)
 }
 
 func (m *_UserDBMgr) SearchCount(where string, args ...interface{}) (int64, error) {
@@ -633,7 +622,7 @@ func (m *_UserDBMgr) SearchConditionsCount(conditions []string, args ...interfac
 	return m.queryCount(orm.SQLWhere(conditions), args...)
 }
 
-func (m *_UserDBMgr) FetchBySQL(q string, args ...interface{}) (results []interface{}, err error) {
+func (m *_UserDBMgr) FetchBySQL(q string, args ...interface{}) (results []*User, err error) {
 	rows, err := m.db.Query(q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("User fetch error: %v", err)
@@ -685,6 +674,7 @@ func (m *_UserDBMgr) Exist(pk PrimaryKey) (bool, error) {
 	return (c != 0), nil
 }
 
+// Deprecated: Use FetchByPrimaryKey instead.
 func (m *_UserDBMgr) Fetch(pk PrimaryKey) (*User, error) {
 	obj := UserMgr.NewUser()
 	query := fmt.Sprintf("SELECT %s FROM users %s", strings.Join(obj.GetColumns(), ","), pk.SQLFormat())
@@ -693,27 +683,105 @@ func (m *_UserDBMgr) Fetch(pk PrimaryKey) (*User, error) {
 		return nil, err
 	}
 	if len(objs) > 0 {
-		return objs[0].(*User), nil
+		return objs[0], nil
 	}
 	return nil, fmt.Errorf("User fetch record not found")
 }
 
-func (m *_UserDBMgr) FetchByPrimaryKeys(pks []PrimaryKey) ([]*User, error) {
-	params := make([]string, 0, len(pks))
-	for _, pk := range pks {
-		params = append(params, fmt.Sprint(pk.(*IdOfUserPK).Id))
-	}
+// err not found check
+func (m *_UserDBMgr) IsErrNotFound(err error) bool {
+	return strings.Contains(err.Error(), "not found") || err == sql.ErrNoRows
+}
+
+// primary key
+func (m *_UserDBMgr) FetchByPrimaryKey(id int32) (*User, error) {
 	obj := UserMgr.NewUser()
-	query := fmt.Sprintf("SELECT %s FROM users WHERE `id` IN (%s)", strings.Join(obj.GetColumns(), ","), strings.Join(params, ","))
-	objs, err := m.FetchBySQL(query)
+	pk := &IdOfUserPK{
+		Id: id,
+	}
+
+	query := fmt.Sprintf("SELECT %s FROM users %s", strings.Join(obj.GetColumns(), ","), pk.SQLFormat())
+	objs, err := m.FetchBySQL(query, pk.SQLParams()...)
 	if err != nil {
 		return nil, err
 	}
-	results := make([]*User, 0, len(objs))
-	for _, obj := range objs {
-		results = append(results, obj.(*User))
+	if len(objs) > 0 {
+		return objs[0], nil
 	}
-	return results, nil
+	return nil, fmt.Errorf("User fetch record not found")
+}
+
+func (m *_UserDBMgr) FetchByPrimaryKeys(ids []int32) ([]*User, error) {
+	size := len(ids)
+	if size == 0 {
+		return nil, nil
+	}
+	params := make([]interface{}, 0, size)
+	for _, pk := range ids {
+		params = append(params, pk)
+	}
+	obj := UserMgr.NewUser()
+	query := fmt.Sprintf("SELECT %s FROM users WHERE `id` IN (?%s)", strings.Join(obj.GetColumns(), ","),
+		strings.Repeat(",?", size-1))
+	return m.FetchBySQL(query, params...)
+}
+
+// indexes
+
+func (m *_UserDBMgr) FindBySex(sex bool, limit int, offset int) ([]*User, error) {
+	obj := UserMgr.NewUser()
+	idx := &SexOfUserIDX{
+		Sex:    sex,
+		limit:  limit,
+		offset: offset,
+	}
+
+	query := fmt.Sprintf("SELECT %s FROM users %s", strings.Join(obj.GetColumns(), ","), idx.SQLFormat(true))
+	return m.FetchBySQL(query, idx.SQLParams()...)
+}
+
+func (m *_UserDBMgr) FindAllBySex(sex bool) ([]*User, error) {
+	obj := UserMgr.NewUser()
+	idx := &SexOfUserIDX{
+		Sex: sex,
+	}
+
+	query := fmt.Sprintf("SELECT %s FROM users %s", strings.Join(obj.GetColumns(), ","), idx.SQLFormat(true))
+	return m.FetchBySQL(query, idx.SQLParams()...)
+}
+
+func (m *_UserDBMgr) FindBySexGroup(items []bool) ([]*User, error) {
+	obj := UserMgr.NewUser()
+	if len(items) == 0 {
+		return nil, nil
+	}
+	params := make([]interface{}, 0, len(items))
+	for _, item := range items {
+		params = append(params, item)
+	}
+	query := fmt.Sprintf("SELECT %s FROM users where `sex` in (?", strings.Join(obj.GetColumns(), ",")) +
+		strings.Repeat(",?", len(items)-1) + ")"
+	return m.FetchBySQL(query, params...)
+}
+
+// uniques
+
+func (m *_UserDBMgr) FetchByMailboxPassword(mailbox string, password string) (*User, error) {
+	obj := UserMgr.NewUser()
+	uniq := &MailboxPasswordOfUserUK{
+		Mailbox:  mailbox,
+		Password: password,
+	}
+
+	query := fmt.Sprintf("SELECT %s FROM users %s", strings.Join(obj.GetColumns(), ","), uniq.SQLFormat(true))
+	objs, err := m.FetchBySQL(query, uniq.SQLParams()...)
+	if err != nil {
+		return nil, err
+	}
+	if len(objs) > 0 {
+		return objs[0], nil
+	}
+	return nil, fmt.Errorf("User fetch record not found")
 }
 
 func (m *_UserDBMgr) FindOne(unique Unique) (PrimaryKey, error) {
@@ -727,6 +795,7 @@ func (m *_UserDBMgr) FindOne(unique Unique) (PrimaryKey, error) {
 	return nil, fmt.Errorf("User find record not found")
 }
 
+// Deprecated: Use FetchByXXXUnique instead.
 func (m *_UserDBMgr) FindOneFetch(unique Unique) (*User, error) {
 	obj := UserMgr.NewUser()
 	query := fmt.Sprintf("SELECT %s FROM users %s", strings.Join(obj.GetColumns(), ","), unique.SQLFormat(true))
@@ -735,11 +804,12 @@ func (m *_UserDBMgr) FindOneFetch(unique Unique) (*User, error) {
 		return nil, err
 	}
 	if len(objs) > 0 {
-		return objs[0].(*User), nil
+		return objs[0], nil
 	}
 	return nil, fmt.Errorf("none record")
 }
 
+// Deprecated: Use FindByXXXUnique instead.
 func (m *_UserDBMgr) Find(index Index) (int64, []PrimaryKey, error) {
 	total, err := m.queryCount(index.SQLFormat(false), index.SQLParams()...)
 	if err != nil {
@@ -757,13 +827,9 @@ func (m *_UserDBMgr) FindFetch(index Index) (int64, []*User, error) {
 
 	obj := UserMgr.NewUser()
 	query := fmt.Sprintf("SELECT %s FROM users %s", strings.Join(obj.GetColumns(), ","), index.SQLFormat(true))
-	objs, err := m.FetchBySQL(query, index.SQLParams()...)
+	results, err := m.FetchBySQL(query, index.SQLParams()...)
 	if err != nil {
 		return total, nil, err
-	}
-	results := make([]*User, 0, len(objs))
-	for _, obj := range objs {
-		results = append(results, obj.(*User))
 	}
 	return total, results, nil
 }
@@ -784,13 +850,9 @@ func (m *_UserDBMgr) RangeFetch(scope Range) (int64, []*User, error) {
 	}
 	obj := UserMgr.NewUser()
 	query := fmt.Sprintf("SELECT %s FROM users %s", strings.Join(obj.GetColumns(), ","), scope.SQLFormat(true))
-	objs, err := m.FetchBySQL(query, scope.SQLParams()...)
+	results, err := m.FetchBySQL(query, scope.SQLParams()...)
 	if err != nil {
 		return total, nil, err
-	}
-	results := make([]*User, 0, len(objs))
-	for _, obj := range objs {
-		results = append(results, obj.(*User))
 	}
 	return total, results, nil
 }
@@ -1002,11 +1064,13 @@ func (m *_UserDBMgr) Save(obj *User) (int64, error) {
 }
 
 func (m *_UserDBMgr) Delete(obj *User) (int64, error) {
-	pk := obj.GetPrimaryKey()
-	return m.DeleteByPrimaryKey(pk)
+	return m.DeleteByPrimaryKey(obj.Id)
 }
 
-func (m *_UserDBMgr) DeleteByPrimaryKey(pk PrimaryKey) (int64, error) {
+func (m *_UserDBMgr) DeleteByPrimaryKey(id int32) (int64, error) {
+	pk := &IdOfUserPK{
+		Id: id,
+	}
 	q := fmt.Sprintf("DELETE FROM users %s", pk.SQLFormat())
 	result, err := m.db.Exec(q, pk.SQLParams()...)
 	if err != nil {
@@ -1055,7 +1119,7 @@ func (m *_UserRedisMgr) BeginPipeline(pipes ...*redis.Pipeline) *_UserRedisPipel
 	return &_UserRedisPipeline{m.Pipeline(), nil}
 }
 
-func (m *_UserRedisMgr) Load(db DBFetcher) error {
+func (m *_UserRedisMgr) Load(db *_UserDBMgr) error {
 	if err := m.Clear(); err != nil {
 		return err
 	}
@@ -1066,32 +1130,29 @@ func (m *_UserRedisMgr) Load(db DBFetcher) error {
 
 }
 
-func (m *_UserRedisMgr) AddBySQL(db DBFetcher, sql string, args ...interface{}) error {
+func (m *_UserRedisMgr) AddBySQL(db *_UserDBMgr, sql string, args ...interface{}) error {
 	objs, err := db.FetchBySQL(sql, args...)
 	if err != nil {
 		return err
 	}
 
-	redisObjs := make([]*User, len(objs))
-	for i, obj := range objs {
-		redisObjs[i] = obj.(*User)
-	}
-
-	return m.SaveBatch(redisObjs)
+	return m.SaveBatch(objs)
 }
-func (m *_UserRedisMgr) DelBySQL(db DBFetcher, sql string, args ...interface{}) error {
+func (m *_UserRedisMgr) DelBySQL(db *_UserDBMgr, sql string, args ...interface{}) error {
 	objs, err := db.FetchBySQL(sql, args...)
 	if err != nil {
 		return err
 	}
 
 	for _, obj := range objs {
-		if err := m.Delete(obj.(*User)); err != nil {
+		if err := m.Delete(obj); err != nil {
 			return err
 		}
 	}
 	return nil
 }
+
+var newUserObj = UserMgr.NewUser()
 
 //! redis model read
 func (m *_UserRedisMgr) FindOne(unique Unique) (PrimaryKey, error) {
@@ -1220,11 +1281,16 @@ func (m *_UserRedisMgr) RangeRevertFetch(scope Range) (int64, []*User, error) {
 }
 
 func (m *_UserRedisMgr) Fetch(pk PrimaryKey) (*User, error) {
+	key := keyOfObject(newUserObj, pk.Key())
+	return m.FetchByKey(key)
+}
+
+func (m *_UserRedisMgr) FetchByKey(key string) (*User, error) {
 	obj := UserMgr.NewUser()
 
 	pipe := m.BeginPipeline()
-	pipe.Exists(keyOfObject(obj, pk.Key()))
-	pipe.HMGet(keyOfObject(obj, pk.Key()),
+	pipe.Exists(key)
+	pipe.HMGet(key,
 		"Id",
 		"Name",
 		"Mailbox",
@@ -1246,7 +1312,7 @@ func (m *_UserRedisMgr) Fetch(pk PrimaryKey) (*User, error) {
 
 	if b, err := cmds[0].(*redis.BoolCmd).Result(); err == nil {
 		if !b {
-			return nil, fmt.Errorf("User primary key:(%s) not exist", pk.Key())
+			return nil, fmt.Errorf("User primary key:(%s) not exist", key)
 		}
 	}
 
@@ -1254,55 +1320,71 @@ func (m *_UserRedisMgr) Fetch(pk PrimaryKey) (*User, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := orm.StringScan(strs[0].(string), &obj.Id); err != nil {
+
+	var sv string
+	sv, _ = strs[0].(string)
+	if err := orm.StringScan(sv, &obj.Id); err != nil {
 		return nil, err
 	}
-	if err := orm.StringScan(strs[1].(string), &obj.Name); err != nil {
+	sv, _ = strs[1].(string)
+	if err := orm.StringScan(sv, &obj.Name); err != nil {
 		return nil, err
 	}
-	if err := orm.StringScan(strs[2].(string), &obj.Mailbox); err != nil {
+	sv, _ = strs[2].(string)
+	if err := orm.StringScan(sv, &obj.Mailbox); err != nil {
 		return nil, err
 	}
-	if err := orm.StringScan(strs[3].(string), &obj.Sex); err != nil {
+	sv, _ = strs[3].(string)
+	if err := orm.StringScan(sv, &obj.Sex); err != nil {
 		return nil, err
 	}
-	if err := orm.StringScan(strs[4].(string), &obj.Age); err != nil {
+	sv, _ = strs[4].(string)
+	if err := orm.StringScan(sv, &obj.Age); err != nil {
 		return nil, err
 	}
-	if err := orm.StringScan(strs[5].(string), &obj.Longitude); err != nil {
+	sv, _ = strs[5].(string)
+	if err := orm.StringScan(sv, &obj.Longitude); err != nil {
 		return nil, err
 	}
-	if err := orm.StringScan(strs[6].(string), &obj.Latitude); err != nil {
+	sv, _ = strs[6].(string)
+	if err := orm.StringScan(sv, &obj.Latitude); err != nil {
 		return nil, err
 	}
-	if err := orm.StringScan(strs[7].(string), &obj.Description); err != nil {
+	sv, _ = strs[7].(string)
+	if err := orm.StringScan(sv, &obj.Description); err != nil {
 		return nil, err
 	}
-	if err := orm.StringScan(strs[8].(string), &obj.Password); err != nil {
+	sv, _ = strs[8].(string)
+	if err := orm.StringScan(sv, &obj.Password); err != nil {
 		return nil, err
 	}
-	if err := orm.StringScan(strs[9].(string), &obj.HeadUrl); err != nil {
+	sv, _ = strs[9].(string)
+	if err := orm.StringScan(sv, &obj.HeadUrl); err != nil {
 		return nil, err
 	}
 	obj.HeadUrl = orm.Decode(obj.HeadUrl)
-	if err := orm.StringScan(strs[10].(string), &obj.Status); err != nil {
+	sv, _ = strs[10].(string)
+	if err := orm.StringScan(sv, &obj.Status); err != nil {
 		return nil, err
 	}
+	sv, _ = strs[11].(string)
 	var val11 int64
-	if err := orm.StringScan(strs[11].(string), &val11); err != nil {
+	if err := orm.StringScan(sv, &val11); err != nil {
 		return nil, err
 	}
 	obj.CreatedAt = time.Unix(val11, 0)
+	sv, _ = strs[12].(string)
 	var val12 int64
-	if err := orm.StringScan(strs[12].(string), &val12); err != nil {
+	if err := orm.StringScan(sv, &val12); err != nil {
 		return nil, err
 	}
 	obj.UpdatedAt = time.Unix(val12, 0)
-	if strs[13].(string) == "nil" {
+	sv, _ = strs[13].(string)
+	if sv == "nil" {
 		obj.DeletedAt = nil
 	} else {
 		var val13 int64
-		if err := orm.StringScan(strs[13].(string), &val13); err != nil {
+		if err := orm.StringScan(sv, &val13); err != nil {
 			return nil, err
 		}
 		DeletedAtValue := time.Unix(val13, 0)
@@ -1455,8 +1537,8 @@ func (m *_UserRedisMgr) FetchByPrimaryKeys(pks []PrimaryKey) ([]*User, error) {
 			errall = append(errall, fmt.Sprintf("key:%v,err:%v", pks[i].Key(), err.Error()))
 			continue
 		}
-		var val11 int64
 		sv, ok = strs[11].(string)
+		var val11 int64
 		if !ok {
 			errall = append(errall, fmt.Sprintf("convert %v to string error", strs[11]))
 			continue
@@ -1466,8 +1548,8 @@ func (m *_UserRedisMgr) FetchByPrimaryKeys(pks []PrimaryKey) ([]*User, error) {
 			continue
 		}
 		obj.CreatedAt = time.Unix(val11, 0)
-		var val12 int64
 		sv, ok = strs[12].(string)
+		var val12 int64
 		if !ok {
 			errall = append(errall, fmt.Sprintf("convert %v to string error", strs[12]))
 			continue
@@ -1477,11 +1559,11 @@ func (m *_UserRedisMgr) FetchByPrimaryKeys(pks []PrimaryKey) ([]*User, error) {
 			continue
 		}
 		obj.UpdatedAt = time.Unix(val12, 0)
-		if strs[13].(string) == "nil" {
+		sv, ok = strs[13].(string)
+		if sv == "nil" {
 			obj.DeletedAt = nil
 		} else {
 			var val13 int64
-			sv, ok = strs[13].(string)
 			if !ok {
 				errall = append(errall, fmt.Sprintf("convert %v to string error", strs[13]))
 				continue

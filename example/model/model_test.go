@@ -73,7 +73,8 @@ var _ = Describe("manager", func() {
 	Describe("load", func() {
 		It("mysql => redis", func() {
 			Ω(MySQL()).ShouldNot(BeNil())
-			Ω(UserRedisMgr(Redis()).Load(UserDBMgr(MySQL()))).ShouldNot(HaveOccurred())
+			dbMgr := UserDBMgr(MySQL())
+			Ω(UserRedisMgr(Redis()).Load(dbMgr)).ShouldNot(HaveOccurred())
 		})
 	})
 
@@ -154,6 +155,8 @@ var _ = Describe("redis-orm.mysql", func() {
 			_, err = mgr.Fetch(user.GetPrimaryKey())
 			Ω(err).Should(HaveOccurred())
 
+			_, err = mgr.FetchByPrimaryKey(user.Id)
+			Ω(mgr.IsErrNotFound(err)).To(BeTrue())
 			//! save
 
 			user.HeadUrl = "ccc.png"
@@ -164,58 +167,6 @@ var _ = Describe("redis-orm.mysql", func() {
 			n, err = mgr.Delete(user)
 			Ω(n).To(Equal(int64(1)))
 			Ω(err).ShouldNot(HaveOccurred())
-
-		})
-
-	})
-})
-
-var _ = Describe("redis-orm.mssql", func() {
-	Describe("CRUD", func() {
-		It("create", func() {
-			MsSQLSetup(&MsSQLConfig{
-				Host:     "192.168.199.66",
-				Port:     1433,
-				UserName: "manager",
-				Password: "65ezbuy@nicemanager",
-				Database: "Pro_test",
-			})
-
-			db := MsSQL()
-			Ω(db).ShouldNot(BeNil())
-
-			// objs, err := OfficeDBMgr(db).SearchConditions([]string{}, "", 0, 2)
-			// Ω(err).ShouldNot(HaveOccurred())
-			// Ω(len(objs)).To(Equal(2))
-
-			office := OfficeMgr.NewOffice()
-			office.OfficeName = "Test"
-			office.OfficeArea = "SH"
-			office.SearchOriginCode = "xxx"
-			office.ProcessingOriginCode = "yyy"
-			office.CreateBy = "Jay"
-			office.CreateDate = time.Now()
-			office.UpdateDate = office.CreateDate
-
-			tx, err := db.BeginTx()
-			Ω(err).ShouldNot(HaveOccurred())
-			defer tx.Close()
-
-			n, err := OfficeDBMgr(tx).Create(office)
-			Ω(err).ShouldNot(HaveOccurred())
-			Ω(n).To(Equal(int64(1)))
-
-			log.Println("mssql created office:", office)
-			office.OfficeName = "UpdateTest"
-			office.UpdateBy = "ljp"
-			office.UpdateDate = time.Now()
-			n, err = OfficeDBMgr(tx).Update(office)
-			Ω(err).ShouldNot(HaveOccurred())
-			Ω(n).To(Equal(int64(1)))
-
-			n, err = OfficeDBMgr(tx).Delete(office)
-			Ω(err).ShouldNot(HaveOccurred())
-			Ω(n).To(Equal(int64(1)))
 
 		})
 
@@ -422,7 +373,13 @@ var _ = Describe("redis-orm.mysql", func() {
 			Ω(int(total)).To(Equal(50))
 			Ω(len(pks)).To(Equal(50))
 
-			objs, err := UserDBMgr(MySQL()).FetchByPrimaryKeys(pks)
+			keys := make([]int32, len(pks))
+			for i, pk := range pks {
+				v := pk.(*IdOfUserPK)
+				keys[i] = v.Id
+			}
+
+			objs, err := UserDBMgr(MySQL()).FetchByPrimaryKeys(keys)
 			Ω(err).ShouldNot(HaveOccurred())
 			Ω(len(objs)).To(Equal(50))
 
@@ -439,7 +396,13 @@ var _ = Describe("redis-orm.mysql", func() {
 			Ω(int(total)).To(Equal(24))
 			Ω(len(pks)).To(Equal(10))
 
-			objs, err := UserDBMgr(MySQL()).FetchByPrimaryKeys(pks)
+			keys := make([]int32, len(pks))
+			for i, pk := range pks {
+				v := pk.(*IdOfUserPK)
+				keys[i] = v.Id
+			}
+
+			objs, err := UserDBMgr(MySQL()).FetchByPrimaryKeys(keys)
 			Ω(err).ShouldNot(HaveOccurred())
 			Ω(len(objs)).To(Equal(10))
 		})

@@ -23,6 +23,10 @@ func (pk *PrimaryKey) IsSingleField() bool {
 	return false
 }
 
+func (pk *PrimaryKey) GetFuncParam() string {
+	return Fields(pk.Fields).GetFuncParam()
+}
+
 func (pk *PrimaryKey) FirstField() *Field {
 	if len(pk.Fields) > 0 {
 		return pk.Fields[0]
@@ -71,4 +75,12 @@ func (pk *PrimaryKey) SQLColumn(driver string) string {
 		return fmt.Sprintf("PRIMARY KEY(%s)", strings.Join(columns, ","))
 	}
 	return ""
+}
+
+func (pk *PrimaryKey) GetConstructor() string {
+	return Fields(pk.Fields).GetConstructor()
+}
+
+func (pk *PrimaryKey) GetObjectParam() string {
+	return Fields(pk.Fields).GetObjectParam()
 }

@@ -11,13 +11,13 @@ func (obj *{{.Name}}) GetClassName() string {
 }
 
 func (obj *{{.Name}}) GetTableName() string {
-	return "{{.DbTable}}"	
+	return "{{.DbTable}}"
 }
 
 func (obj *{{.Name}}) GetColumns() []string {
 	columns := []string{
 	{{- range $field := .Fields}}
-	"{{$field.FieldName}}",
+	"{{$obj.DbTable}}.{{$field.FieldName}}",
 	{{- end}}
 	}
 	return columns

@@ -40,6 +40,10 @@ func NewDBStore(driver, host string, port int, database, username, password stri
 	default:
 		return nil, fmt.Errorf("unsupport db driver: %s", driver)
 	}
+	return NewDBDSNStore(driver, dsn)
+}
+
+func NewDBDSNStore(driver, dsn string) (*DBStore, error) {
 	db, err := sql.Open(driver, dsn)
 	if err != nil {
 		return nil, err
@@ -212,7 +216,6 @@ func (tx *DBTx) Exec(sql string, args ...interface{}) (sql.Result, error) {
 	if err != nil {
 		tx.err = err
 	}
-	tx.err = err
 	return result, tx.err
 }
 
