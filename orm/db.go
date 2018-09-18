@@ -149,34 +149,11 @@ func (store *DBStore) BeginTx() (*DBTx, error) {
 	}, nil
 }
 
-func (store *DBStore) BeginTxWithCloser() (*DBTx, func(), error) {
-	tx, err := store.Begin()
-	if err != nil {
-		return nil, nil, err
-	}
-	newTx := &DBTx{
-		tx:      tx,
-		debug:   store.debug,
-		slowlog: store.slowlog,
-	}
-	closeFunc := func() {
-		newTx.closeWithNoErr()
-	}
-	return newTx, closeFunc, nil
-}
-
 func (tx *DBTx) Close() error {
 	if tx.err != nil {
 		return tx.tx.Rollback()
 	}
 	return tx.tx.Commit()
-}
-
-func (tx *DBTx) closeWithNoErr() {
-	if tx.err != nil {
-		tx.err = tx.tx.Rollback()
-	}
-	tx.err = tx.tx.Commit()
 }
 
 func (tx *DBTx) Query(sql string, args ...interface{}) (*sql.Rows, error) {
@@ -221,8 +198,4 @@ func (tx *DBTx) Exec(sql string, args ...interface{}) (sql.Result, error) {
 
 func (tx *DBTx) SetError(err error) {
 	tx.err = err
-}
-
-func (tx *DBTx) GetError() error {
-	return tx.err
 }
